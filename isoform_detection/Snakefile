@@ -18,7 +18,7 @@ def get_fastq(wildcards):
 
 rule all:
     input:
-        expand('wp3_add_ic_tag/{sample_id}.bam', sample_id=sample_id),
+        expand('wp3_add_ic_tag/{sample_id}.bam.bai', sample_id=sample_id)
 
 
 rule stringtie:
@@ -142,3 +142,11 @@ rule add_ic_tag:
             -c {input.tsv} \
             -o {output.bam}
         """
+
+rule index_bam:
+    input:
+        bam="wp3_add_ic_tag/{sample_id}.bam"
+    output:
+        bai="wp3_add_ic_tag/{sample_id}.bam.bai"
+    shell:
+        "samtools index {input.bam}"
