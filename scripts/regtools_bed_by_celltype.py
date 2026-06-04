@@ -9,20 +9,27 @@
 
 
 import os
+import shutil
 import colorsys
 from glob import glob
 import pysam
 import pysam.samtools
 
-BASE_DIR = "/mnt/data/project0061"
+BASE_DIR = 'data/raw_bams/'
+BAM_DIR = BASE_DIR
 
+# Dynamically check for regtools executable in the PATH
+regtools_exe = shutil.which("regtools")
 
+if regtools_exe is None:
+    print("ERROR: 'regtools' not found! Please ensure it is installed via Conda.")
+    exit(1)
+    
 # In[ ]:
 
 
 # Loop through BAM files in a directory and extract cell types
 #Assuming BAM files are named like "celltype_sample.bam"
-BAM_DIR = os.environ.get('BAM_DIR', f'{BASE_DIR}/bam_dir/')
 bam_files = [f for f in os.listdir(BAM_DIR) if f.endswith('.bam')]
 #Assume BAM_DIR will contain bam files that are pre-merged for each cell type (e.g. [Stem_C.bam, Stem_D.bam, ...])
 celltypes = [f.split('.')[0] for f in bam_files]
@@ -50,7 +57,8 @@ for bam_file in bam_files:
     bed_file = os.path.splitext(bam_file)[0] + ".junctions.bed"
     bed_path = os.path.join(BAM_DIR, bed_file)
     # Run regtools junctions extract
-    os.system(f"{BASE_DIR}/regtools/build/regtools junctions extract -s XS {bam_path} -o {bed_path}")
+    #Uses the regtools executable found in the path by shutil
+    os.system(f"{regtools_exe} junctions extract -s XS {bam_path} -o {bed_path}")
 
 
 # In[ ]:
@@ -61,9 +69,9 @@ for bam_file in bam_files:
     celltype = bam_file.split('.')[0]
     rgb = ','.join(map(str, celltype_colors.get(celltype, (0, 0, 0))))  # Default to black if not found
     bed_file = os.path.splitext(bam_file)[0] + ".junctions.bed"
+    bed_path = os.path.join(BAM_DIR, bed_file)
     if not os.path.exists(bed_path):
         continue
-    bed_path = os.path.join(BAM_DIR, bed_file)
     rgb_bed_file = bed_file + ".rgb"
     rgb_bed_path = os.path.join(BAM_DIR, rgb_bed_file)
     with open(bed_path, 'r') as infile, open(rgb_bed_path, 'w') as outfile:
