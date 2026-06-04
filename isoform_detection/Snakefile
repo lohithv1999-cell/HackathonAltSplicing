@@ -1,16 +1,5 @@
-"""
-snakemake -p -n -j 10 -d /mnt/data/project0061 -C \
-        sample_id='Mira_1' \
-        bam='dario/Mira_1.sample.bam' \
-        gff='ref/schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3' \
-        genome=ref/schistosoma_mansoni.PRJEA36577.WBPS19.genomic_softmasked.fa \
-        read_mode=single \
-        fragment_length=300 \
-        fragment_sd=100
-
-"""
-
-sample_id = config["sample_id"]
+configfile: "config.yaml"
+sample_id = [config["sample_id"]] # Extracts the sample ID from the config dictionary into a list
 
 os.makedirs("slurm", exist_ok=True)
 
