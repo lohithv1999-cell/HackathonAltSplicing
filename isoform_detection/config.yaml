@@ -1,0 +1,12 @@
+# Data Paths
+bam: "../data/raw/LmexAmpB.sorted.bam"
+gff: "../data/references/TriTrypDB-25_LmexicanaMHOMGT2001U1103.gff"
+genome: "../data/references/TriTrypDB-25_LmexicanaMHOMGT2001U1103.fa"
+
+# Metadata
+sample_id: "LmexAmpB"
+
+# Sequencing Parameters
+read_mode: "paired"   # Options: "single" or "paired"
+fragment_length: 200  # Average length of your RNA fragments
+fragment_sd: 20       # Standard deviation of fragment length
