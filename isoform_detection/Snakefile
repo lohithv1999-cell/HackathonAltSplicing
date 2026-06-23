@@ -1,46 +1,78 @@
-configfile: "config.yaml"
-sample_id = [config["sample_id"]] # Extracts the sample ID from the config dictionary into a list
+import os
+import sys
+import csv
 
+configfile: "config.yaml"
+
+OUT_DIR = config["run_identity"]
 os.makedirs("slurm", exist_ok=True)
 
+COL_CELL_TYPE = config.get("csv_columns", {}).get("cell_type", "cell_type")
+CSV_PATHS = config.get("metadata_csv", [])
+
+# If the metadata CSV path is provided as a string, convert it to a list for consistent processing. If it's empty or not provided, initialize it as an empty list.
+if isinstance(CSV_PATHS, str):
+    CSV_PATHS = [CSV_PATHS] if CSV_PATHS else []
+    
+Col_Barcode = config.get("csv_columns", {}).get("barcode", "barcode")
+Col_CellType = config.get("csv_columns", {}).get("cell_type", "cell_type")
+Col_BAM_File = config.get("csv_columns", {}).get("bam_file", "bam_file")
+
+if CSV_PATHS:
+    # Single Cell Mode
+    RUN_MODE = "single_cell"
+    Target_BAMS = []
+    # Read the metadata CSV files to extract unique cell types, which will be used as target BAM file names for downstream processing. Each cell type corresponds to a separate BAM file that will be generated from the mixed BAM files based on the barcode information.
+    for csv_file in CSV_PATHS:
+        with open(csv_file, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                safe_name = row[COL_CELL_TYPE].replace(" ", "_")  # Cell types had spaces in their name, snakemake to convert the spaces into safe underscores
+                if safe_name not in Target_BAMS:
+                    Target_BAMS.append(safe_name)
+else:
+    # Bulk Mode
+    RUN_MODE = "bulk"
+    # Falls back to bulk mode if no metadata CSV is provided.
+    Target_BAMS = [config["sample_id"]]
+
+def get_starting_bam(wildcards):
+    if RUN_MODE == "single_cell":
+        return f"split_bams/{wildcards.sample_id}.bam"
+    else:
+        return config.get("bam", f"inputs/{wildcards.sample_id}.bam")
 
 def get_fastq(wildcards):
     if config["read_mode"] == "single":
-        return f"fastq/{wildcards.sample_id}_0.fq.gz"
+        return OUT_DIR + f"/fastq/{wildcards.sample_id}_0.fq.gz"
     elif config["read_mode"] == "paired":
         return [
-            f"fastq/{wildcards.sample_id}_1.fq.gz",
-            f"fastq/{wildcards.sample_id}_2.fq.gz",
+           OUT_DIR + f"/fastq/{wildcards.sample_id}_1.fq.gz",
+           OUT_DIR + f"/fastq/{wildcards.sample_id}_2.fq.gz",
         ]
     else:
         sys.exit("Invalid read mode")
 
-
 rule all:
     input:
-        expand('wp3_add_ic_tag/{sample_id}.bam.bai', sample_id=sample_id)
-
+        expand(OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam.bai", sample_id=Target_BAMS)
 
 rule stringtie:
     input:
-        bam=config["bam"],
+        bam=get_starting_bam,
         gff=config["gff"],
     output:
-        gtf="stringtie/{sample_id}.gtf",
-    shell:
-        r"""
-        stringtie -o {output.gtf} \
-            -p 24 \
-            -G {input.gff} {input.bam} 
-        """
+        gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
+    shell:     # used a Linux pipe (|) to force samtools to perfectly coordinate to sort the BAM file in memory right before it gets handed to StringTie.
+        r"""samtools sort -@ 8 {input.bam} | stringtie -o {output.gtf} -p 24 -G {input.gff} -"""
 
 
 rule fastaForTranscripts:
     input:
-        gtf="stringtie/{sample_id}.gtf",
+        gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
         genome=config["genome"],
     output:
-        fa="stringtie/{sample_id}.fa",
+        fa=OUT_DIR + "/stringtie/{sample_id}.fa",
     shell:
         r"""
         gffread -w {output.fa} \
@@ -51,9 +83,9 @@ rule fastaForTranscripts:
 
 rule kallisto_index:
     input:
-        fa="stringtie/{sample_id}.fa",
+        fa=OUT_DIR + "/stringtie/{sample_id}.fa",
     output:
-        idx="kallisto/{sample_id}.idx",
+        idx=OUT_DIR + "/kallisto/{sample_id}.idx",
     conda:
         "env/kallisto.yml"
     shell:
@@ -64,11 +96,11 @@ rule kallisto_index:
 
 rule get_fastq_from_bam:
     input:
-        bam=config["bam"],
+        bam=get_starting_bam,
     output:
-        fq0="fastq/{sample_id}_0.fq.gz",
-        fq1="fastq/{sample_id}_1.fq.gz",
-        fq2="fastq/{sample_id}_2.fq.gz",
+        fq0=OUT_DIR + "/fastq/{sample_id}_0.fq.gz",
+        fq1=OUT_DIR + "/fastq/{sample_id}_1.fq.gz",
+        fq2=OUT_DIR + "/fastq/{sample_id}_2.fq.gz",
     shell:
         r"""
         samtools collate -@ 8 -u --no-PG {input.bam} -O \
@@ -78,10 +110,10 @@ rule get_fastq_from_bam:
 
 rule kallisto_quant:
     input:
-        idx="kallisto/{sample_id}.idx",
-        fq=["fastq/{sample_id}_0.fq.gz"],
+        idx=OUT_DIR + "/kallisto/{sample_id}.idx",
+        fq=[OUT_DIR + "/fastq/{sample_id}_0.fq.gz"],
     output:
-        "kallisto/{sample_id}/pseudoalignments.bam",
+        OUT_DIR + "/kallisto/{sample_id}/pseudoalignments.bam",
     conda:
         "env/kallisto.yml"
     params:
@@ -89,19 +121,20 @@ rule kallisto_quant:
         single="--single" if config["read_mode"] == "single" else "",
         fragment_length=config["fragment_length"],
         fragment_sd=config["fragment_sd"],
+        outfolder=OUT_DIR + "/kallisto/{sample_id}" # Added to pass cleanly to shell
     shell:
         r"""
         kallisto quant {params.single} -l {params.fragment_length} -s {params.fragment_sd} \
-            --threads 24 --pseudobam -o kallisto/{wildcards.sample_id} -i {input.idx} {params.fq}
+            --threads 24 --pseudobam -o {params.outfolder} -i {input.idx} {params.fq}
         """
 
 
 rule read_to_transcripts_tsv:
     input:
-        bam="kallisto/{sample_id}/pseudoalignments.bam",
-        gtf="stringtie/{sample_id}.gtf",
+        bam=OUT_DIR + "/kallisto/{sample_id}/pseudoalignments.bam",
+        gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
     output:
-        tsv="kallisto/{sample_id}/read_transcripts.tsv.gz",
+        tsv=OUT_DIR + "/kallisto/{sample_id}/read_transcripts.tsv.gz",
     shell:
         r"""
         {workflow.basedir}/scripts/read_to_transcripts_tsv.py \
@@ -113,9 +146,9 @@ rule read_to_transcripts_tsv:
 
 rule tx_name_to_id:
     input:
-        tsv="kallisto/{sample_id}/read_transcripts.tsv.gz",
+        tsv=OUT_DIR + "/kallisto/{sample_id}/read_transcripts.tsv.gz",
     output:
-        tsv="kallisto/{sample_id}/clusters.tsv",
+        tsv=OUT_DIR + "/kallisto/{sample_id}/clusters.tsv",
     shell:
         r"""
 cat <<'EOF' > {rule}.$$.tmp.R
@@ -131,10 +164,10 @@ rm {rule}.$$.tmp.R
 
 rule add_ic_tag:
     input:
-        tsv="kallisto/{sample_id}/clusters.tsv",
-        bam=config['bam']
+        tsv=OUT_DIR + "/kallisto/{sample_id}/clusters.tsv",
+        bam=get_starting_bam
     output:
-        bam='wp3_add_ic_tag/{sample_id}.bam',
+        bam=OUT_DIR + '/wp3_add_ic_tag/{sample_id}.bam',
     shell:
         r"""
         {workflow.basedir}/../src/python/bam_manipulation/wp3_add_ic_tag.py \
@@ -143,10 +176,37 @@ rule add_ic_tag:
             -o {output.bam}
         """
 
+ # samtools index absolutely demands that BAM files be sorted by their genomic coordinates first.
+ # We cannot index an unsorted BAM,So, made changes that it sorts the file,
+ # overwrites the unsorted one, and then indexes it
 rule index_bam:
     input:
-        bam="wp3_add_ic_tag/{sample_id}.bam"
+        bam=OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam"
     output:
-        bai="wp3_add_ic_tag/{sample_id}.bam.bai"
-    shell:
-        "samtools index {input.bam}"
+        bai=OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam.bai"
+    shell:                                        
+        """
+        samtools sort {input} -o {input}.sorted.bam
+        mv {input}.sorted.bam {input}
+        samtools index {input}
+        """
+
+# Snakemake will only execute the following rule if Run_Mode is set to "single_cell" in the config.yaml file. 
+#This rule takes mixed BAM files and a metadata CSV file,
+# and splits the BAM files into separate BAM files for each cell type
+#based on the barcode information in the BAM file and the mapping provided in the CSV file.
+#The output BAM files are stored in the "split_bams" directory.
+if RUN_MODE == "single_cell":
+    rule split_mixed_bam:
+        input:
+            bams = config.get("mixed_bams", []),
+            csvs = CSV_PATHS
+        output:
+            bams = expand("split_bams/{cell_type}.bam", cell_type=Target_BAMS)
+        params:
+            output_dir = "split_bams",
+            col_barcode = Col_Barcode,
+            col_celltype = Col_CellType,
+            col_bam_file = Col_BAM_File
+        script:
+            "scripts/split_bam.py"

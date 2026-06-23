@@ -70,8 +70,8 @@ def main(argv=None):
     bam_out.close()
 
     # 5) Index the new BAM
-    pysam.index(args.output)
-    print(f"Written and indexed: {args.output}")
+    #pysam.index(args.output)
+    #print(f"Written and indexed: {args.output}")
 
 if __name__ == "__main__":
     import sys
