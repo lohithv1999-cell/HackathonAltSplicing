@@ -44,5 +44,3 @@ snakemake -p \
           -d /mnt/data/project0061/will \
           --use-conda \
           --cores "${SLURM_CPUS_PER_TASK}"
-
-

@@ -1,5 +1,5 @@
 # Run Identity (Name the task as per the user)
-run_identity: "Testing_outputs_for_run_identity_23-06-2026"
+run_identity: "QC_framework_test"
 
 # Data Paths
 # This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file, and reference genome FASTA file.
@@ -25,5 +25,9 @@ csv_columns:
 
 # Sequencing Parameters
 read_mode: "single"   # Options: "single" or "paired"
-fragment_length: 200  # Average length of your RNA fragments
-fragment_sd: 20       # Standard deviation of fragment length
+fragment_length: 200  # Average length of your RNA fragments(350)
+fragment_sd: 20       # Standard deviation of fragment length(60)
+
+# Optional parameter
+# This classifies unassigned (IC:i:0) reads into "scored but below threshold" vs "never pseudo-aligned"
+run_ic0_profiling: true  # To run make it as true if not keep it as false

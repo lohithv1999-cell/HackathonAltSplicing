@@ -3,6 +3,7 @@ import sys
 import csv
 
 configfile: "config.yaml"
+RUN_IC0 = config.get("run_ic0_profiling", False)
 
 OUT_DIR = config["run_identity"]
 os.makedirs("slurm", exist_ok=True)
@@ -53,9 +54,16 @@ def get_fastq(wildcards):
     else:
         sys.exit("Invalid read mode")
 
+def all_targets():
+    targets = [OUT_DIR + "/qc/QC_Dashboard.html"]
+    if RUN_IC0:
+        targets.append(OUT_DIR + "/qc/ic0/ALL_ic0.tsv")
+    return targets
+
 rule all:
     input:
-        expand(OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam.bai", sample_id=Target_BAMS)
+        expand(OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam.bai", sample_id=Target_BAMS),
+        all_targets()
 
 rule stringtie:
     input:
@@ -189,6 +197,71 @@ rule index_bam:
         samtools sort {input} -o {input}.sorted.bam
         mv {input}.sorted.bam {input}
         samtools index {input}
+        """
+# Data extraction of tag completeness
+rule qc_tag_completeness:
+    input:
+        bam = OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam"
+    output:
+        report = OUT_DIR + "/qc/completeness/{sample_id}_completeness.tsv"
+    shell:
+        """
+        python scripts/qc_tag_completeness.py -i {input.bam} -o {output.report} -s {wildcards.sample_id}
+        """
+
+# Sensitivity scanner
+rule qc_parameter_sensitivity:
+    input:
+        bam = OUT_DIR + "/kallisto/{sample_id}/pseudoalignments.bam"
+    output:
+        report = OUT_DIR + "/qc/sensitivity/{sample_id}_sensitivity.tsv"
+    shell:
+        """
+        python scripts/qc_sensitivity_scanner.py -b {input.bam} -o {output.report} -s {wildcards.sample_id}
+        """
+
+# QC dashboard
+rule qc_dashboard:
+    input:
+        comp = expand(OUT_DIR + "/qc/completeness/{sample_id}_completeness.tsv", sample_id=Target_BAMS),
+        sens = expand(OUT_DIR + "/qc/sensitivity/{sample_id}_sensitivity.tsv", sample_id=Target_BAMS)
+    output:
+        html = OUT_DIR + "/qc/QC_Dashboard.html"
+    params:
+        comp_dir = OUT_DIR + "/qc/completeness",
+        sens_dir = OUT_DIR + "/qc/sensitivity"
+    shell:
+        """
+        python scripts/qc_dashboard.py -c {params.comp_dir} -s {params.sens_dir} -o {output.html}
+        """
+
+# Per-cell-type profiling: compares the tagged BAM against kallisto's
+# pseudoalignment BAM to classify each unassigned read.
+rule qc_ic0_profiling:
+    input:
+        tagged = OUT_DIR + "/wp3_add_ic_tag/{sample_id}.bam",
+        pseudo = OUT_DIR + "/kallisto/{sample_id}/pseudoalignments.bam"
+    output:
+        report = OUT_DIR + "/qc/ic0/{sample_id}_ic0.tsv"
+    shell:
+        """
+        python scripts/qc_ic0_profiling.py \
+            -t {input.tagged} \
+            -p {input.pseudo} \
+            -o {output.report} \
+            -s {wildcards.sample_id}
+        """
+
+# Collate the per-cell-type profiles into one combined table.
+rule qc_ic0_collate:
+    input:
+        expand(OUT_DIR + "/qc/ic0/{sample_id}_ic0.tsv", sample_id=Target_BAMS)
+    output:
+        OUT_DIR + "/qc/ic0/ALL_ic0.tsv"
+    shell:
+        """
+        head -1 {input[0]} > {output}
+        for f in {input}; do tail -n +2 "$f" >> {output}; done
         """
 
 # Snakemake will only execute the following rule if Run_Mode is set to "single_cell" in the config.yaml file. 
