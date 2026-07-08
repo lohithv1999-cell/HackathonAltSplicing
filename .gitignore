@@ -5,3 +5,20 @@ __pycache__
 *venv
 *.egg-info
 .snakemake
+isoform_detection/QC_framework_test/
+isoform_detection/Testing_outputs_for_run_identity_*/
+isoform_detection/kallisto/
+isoform_detection/stringtie/
+isoform_detection/fastq/
+isoform_detection/split_bams/
+isoform_detection/wp3_add_ic_tag/
+build/
+jbrowse2-app/
+
+# Large data files and temp files
+*.bam
+*.bam.bai
+*.idx
+*.fq.gz
+samtools.*.tmp.*.bam
+isoform_detection/complete_pipeline_map.pdf
