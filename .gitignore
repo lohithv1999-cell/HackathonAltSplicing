@@ -5,13 +5,15 @@ __pycache__
 *venv
 *.egg-info
 .snakemake
-isoform_detection/QC_framework_test/
+isoform_detection/QC_framework_test*/
 isoform_detection/Testing_outputs_for_run_identity_*/
 isoform_detection/kallisto/
 isoform_detection/stringtie/
 isoform_detection/fastq/
 isoform_detection/split_bams/
 isoform_detection/wp3_add_ic_tag/
+isoform_detection/*_schistosoma_mansoni*/
+isoform_detection/Testing_outputs*/
 build/
 jbrowse2-app/
 
