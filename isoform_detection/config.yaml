@@ -1,5 +1,5 @@
 # Run Identity (Name the task as per the user)
-run_identity: "QC_framework_test"
+run_identity: "QC_framework_test_schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
 
 # Data Paths
 # This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file, and reference genome FASTA file.
@@ -10,11 +10,11 @@ metadata_csv:
   - "../analysis/cc_barcode_Mira_4.csv"
   - "../analysis/cc_barcode_Mira_1.csv"
 
-gff: "../analysis/jbrowse_env/SM_genes_of_interest.gff3"
+gff: "/mnt/autofs/data/userdata/project0061/ref/schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
 genome: "/mnt/data/project0061/bam_manipulation/published/Smansoni_genome/fasta/genome.fa"
 
 # Metadata
-sample_id: "LmexAmpB"
+sample_id: "Schistosoma_mansoni"
 
 # CSV Column Names
 # This section defines the expected column names in the metadata CSV file. The user can customize these if their CSV uses different column names for barcodes, cell types, or BAM file associations.
@@ -27,6 +27,9 @@ csv_columns:
 read_mode: "single"   # Options: "single" or "paired"
 fragment_length: 200  # Average length of your RNA fragments(350)
 fragment_sd: 20       # Standard deviation of fragment length(60)
+
+# ZW probability threshold
+zw_threshold: 0.8
 
 # Optional parameter
 # This classifies unassigned (IC:i:0) reads into "scored but below threshold" vs "never pseudo-aligned"

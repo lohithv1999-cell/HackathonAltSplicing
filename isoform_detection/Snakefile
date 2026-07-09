@@ -55,8 +55,11 @@ def get_fastq(wildcards):
         sys.exit("Invalid read mode")
 
 def all_targets():
-    targets = [OUT_DIR + "/qc/QC_Dashboard.html"]
-    if RUN_IC0:
+    targets = [
+        OUT_DIR + "/qc/QC_Dashboard.html",
+        OUT_DIR + "/qc/summary_statistics.tsv",
+    ]
+    if RUN_IC0:     
         targets.append(OUT_DIR + "/qc/ic0/ALL_ic0.tsv")
     return targets
 
@@ -143,11 +146,14 @@ rule read_to_transcripts_tsv:
         gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
     output:
         tsv=OUT_DIR + "/kallisto/{sample_id}/read_transcripts.tsv.gz",
+    params:
+        threshold=config["zw_threshold"],
     shell:
         r"""
         {workflow.basedir}/scripts/read_to_transcripts_tsv.py \
             --bam {input.bam} \
             --gtf {input.gtf} \
+            --prob-assignment {params.threshold} \
         | gzip > {output.tsv}
         """
 
@@ -229,10 +235,12 @@ rule qc_dashboard:
         html = OUT_DIR + "/qc/QC_Dashboard.html"
     params:
         comp_dir = OUT_DIR + "/qc/completeness",
-        sens_dir = OUT_DIR + "/qc/sensitivity"
+        sens_dir = OUT_DIR + "/qc/sensitivity",
+        ic0_dir = OUT_DIR + "/qc/ic0",
+        threshold = config["zw_threshold"]
     shell:
         """
-        python scripts/qc_dashboard.py -c {params.comp_dir} -s {params.sens_dir} -o {output.html}
+        python scripts/qc_dashboard.py -c {params.comp_dir} -s {params.sens_dir} -i {params.ic0_dir} -t {params.threshold} -o {output.html}
         """
 
 # Per-cell-type profiling: compares the tagged BAM against kallisto's
@@ -262,6 +270,20 @@ rule qc_ic0_collate:
         """
         head -1 {input[0]} > {output}
         for f in {input}; do tail -n +2 "$f" >> {output}; done
+        """
+
+rule qc_summary:
+    input:
+        comp = expand(OUT_DIR + "/qc/completeness/{sample_id}_completeness.tsv", sample_id=Target_BAMS),
+        sens = expand(OUT_DIR + "/qc/sensitivity/{sample_id}_sensitivity.tsv", sample_id=Target_BAMS)
+    output:
+        summary = OUT_DIR + "/qc/summary_statistics.tsv"
+    params:
+        comp_dir = OUT_DIR + "/qc/completeness",
+        sens_dir = OUT_DIR + "/qc/sensitivity"
+    shell:
+        """
+        python scripts/qc_summary.py -c {params.comp_dir} -s {params.sens_dir} -o {output.summary}
         """
 
 # Snakemake will only execute the following rule if Run_Mode is set to "single_cell" in the config.yaml file. 
