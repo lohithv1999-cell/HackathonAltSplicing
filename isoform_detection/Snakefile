@@ -5,7 +5,7 @@ import csv
 configfile: "config.yaml"
 RUN_IC0 = config.get("run_ic0_profiling", False)
 
-OUT_DIR = config["run_identity"]
+OUT_DIR = f"../results/{config['run_identity']}"
 os.makedirs("slurm", exist_ok=True)
 
 COL_CELL_TYPE = config.get("csv_columns", {}).get("cell_type", "cell_type")
