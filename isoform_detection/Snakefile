@@ -4,6 +4,7 @@ import csv
 
 configfile: "config.yaml"
 RUN_IC0 = config.get("run_ic0_profiling", False)
+GFF = config.get("gff", "")
 
 OUT_DIR = f"../results/{config['run_identity']}"
 os.makedirs("slurm", exist_ok=True)
@@ -52,7 +53,11 @@ def get_fastq(wildcards):
            OUT_DIR + f"/fastq/{wildcards.sample_id}_2.fq.gz",
         ]
     else:
-        sys.exit("Invalid read mode")
+        sys.exit("Invalid read mode") 
+
+# Generate the appropriate GFF flag for StringTie based on whether an annotation is provided
+def stringtie_gff_flag(wildcards):
+    return f"-G {GFF}" if GFF else ""
 
 def all_targets():
     targets = [
@@ -71,11 +76,12 @@ rule all:
 rule stringtie:
     input:
         bam=get_starting_bam,
-        gff=config["gff"],
     output:
         gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
+    params:
+        gflag=stringtie_gff_flag,
     shell:     # used a Linux pipe (|) to force samtools to perfectly coordinate to sort the BAM file in memory right before it gets handed to StringTie.
-        r"""samtools sort -@ 8 {input.bam} | stringtie -o {output.gtf} -p 24 -G {input.gff} -"""
+        r"""samtools sort -@ 8 {input.bam} | stringtie -o {output.gtf} -p 24 {params.gflag} -"""
 
 
 rule fastaForTranscripts:

@@ -1,5 +1,5 @@
 # Run Identity (Name the task as per the user)
-run_identity: "QC_framework_test_schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
+run_identity: "denovo_no_annotation"
 
 # Data Paths
 # This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file, and reference genome FASTA file.
@@ -10,7 +10,7 @@ metadata_csv:
   - "../analysis/cc_barcode_Mira_4.csv"
   - "../analysis/cc_barcode_Mira_1.csv"
 
-gff: "/mnt/autofs/data/userdata/project0061/ref/schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
+gff: ""  # /mnt/autofs/data/userdata/project0061/ref/schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3
 genome: "/mnt/data/project0061/bam_manipulation/published/Smansoni_genome/fasta/genome.fa"
 
 # Metadata
