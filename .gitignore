@@ -16,6 +16,7 @@ isoform_detection/*_schistosoma_mansoni*/
 isoform_detection/Testing_outputs*/
 build/
 jbrowse2-app/
+results/
 
 # Large data files and temp files
 *.bam
@@ -24,3 +25,4 @@ jbrowse2-app/
 *.fq.gz
 samtools.*.tmp.*.bam
 isoform_detection/complete_pipeline_map.pdf
+.panoptes.db

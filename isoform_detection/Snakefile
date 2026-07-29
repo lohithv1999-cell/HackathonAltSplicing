@@ -5,7 +5,7 @@ import csv
 configfile: "config.yaml"
 RUN_IC0 = config.get("run_ic0_profiling", False)
 GFF = config.get("gff", "")
-
+RUN_SPLITHALF = config.get("run_splithalf", False)
 OUT_DIR = f"../results/{config['run_identity']}"
 os.makedirs("slurm", exist_ok=True)
 
@@ -39,6 +39,11 @@ else:
     Target_BAMS = [config["sample_id"]]
 
 def get_starting_bam(wildcards):
+    # Split-half pseudo-samples live in their own directory so they never collide
+    # with the real cell-type BAMs from split_mixed_bam. Checked first, because a
+    # half is not a cell type in Target_BAMS.
+    if "__half" in wildcards.sample_id:
+        return OUT_DIR + f"/qc/splithalf/bams/{wildcards.sample_id}.bam"
     if RUN_MODE == "single_cell":
         return f"split_bams/{wildcards.sample_id}.bam"
     else:
@@ -66,6 +71,8 @@ def all_targets():
     ]
     if RUN_IC0:     
         targets.append(OUT_DIR + "/qc/ic0/ALL_ic0.tsv")
+    if RUN_SPLITHALF:
+        targets.append(OUT_DIR + "/qc/splithalf/ALL_stability.tsv")
     return targets
 
 rule all:
@@ -290,6 +297,70 @@ rule qc_summary:
     shell:
         """
         python scripts/qc_summary.py -c {params.comp_dir} -s {params.sens_dir} -o {output.summary}
+        """
+# Splits each cell-type BAM into two halves by read-name hash and runs
+# each half through the existing assembly and pseudoalignment rules as a
+# pseudo-sample ({cell}__halfA, {cell}__halfB). The halves are then
+# compared: gffcompare matches isoforms on intron chain, since StringTie
+# names transcripts arbitrarily per run, and kallisto counts are
+# correlated across the matched pairs.
+
+# Diagnostic only. The halves stop after kallisto and never enter the
+# tagging chain, so no tagged BAMs are produced from them and nothing is
+# recombined. They are deliberately depth-degraded in order to test
+# stability, which makes them an instrument rather than an output.
+
+def get_bam_to_split(wildcards):
+    if RUN_MODE == "single_cell":
+        return f"split_bams/{wildcards.cell}.bam"
+    return config.get("bam", f"inputs/{wildcards.cell}.bam")
+
+
+rule qc_splithalf_split:
+    input:
+        bam=get_bam_to_split,
+    output:
+        a=OUT_DIR + "/qc/splithalf/bams/{cell}__halfA.bam",
+        b=OUT_DIR + "/qc/splithalf/bams/{cell}__halfB.bam",
+    shell:
+        r"""
+        python scripts/qc_split_bam.py -i {input.bam} -a {output.a} -b {output.b}
+        """
+
+
+rule qc_splithalf_compare:
+    input:
+        gtf_a=OUT_DIR + "/stringtie/{cell}__halfA.gtf",
+        gtf_b=OUT_DIR + "/stringtie/{cell}__halfB.gtf",
+        # kallisto_quant declares only the pseudobam, so we depend on that to
+        # trigger the build and reach abundance.tsv beside it through params.
+        bam_a=OUT_DIR + "/kallisto/{cell}__halfA/pseudoalignments.bam",
+        bam_b=OUT_DIR + "/kallisto/{cell}__halfB/pseudoalignments.bam",
+    output:
+        tsv=OUT_DIR + "/qc/splithalf/{cell}_stability.tsv",
+    params:
+        abund_a=OUT_DIR + "/kallisto/{cell}__halfA/abundance.tsv",
+        abund_b=OUT_DIR + "/kallisto/{cell}__halfB/abundance.tsv",
+        prefix=OUT_DIR + "/qc/splithalf/gffcmp/{cell}",
+    shell:
+        r"""
+        python scripts/qc_splithalf_compare.py \
+            --gtf-a {input.gtf_a} --gtf-b {input.gtf_b} \
+            --abund-a {params.abund_a} --abund-b {params.abund_b} \
+            --gffcompare-prefix {params.prefix} \
+            --sample {wildcards.cell} \
+            -o {output.tsv}
+        """
+
+
+rule qc_splithalf_collate:
+    input:
+        expand(OUT_DIR + "/qc/splithalf/{cell}_stability.tsv", cell=Target_BAMS),
+    output:
+        OUT_DIR + "/qc/splithalf/ALL_stability.tsv",
+    shell:
+        r"""
+        python scripts/qc_splithalf_collate.py -i {input} -o {output}
         """
 
 # Snakemake will only execute the following rule if Run_Mode is set to "single_cell" in the config.yaml file. 
