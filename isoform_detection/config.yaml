@@ -1,8 +1,9 @@
 # Run Identity (Name the task as per the user)
-run_identity: "02_QC_framework_test_schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
+run_identity: "03_full_gff_stranded_stringtie"
 
 # Data Paths
-# This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file, and reference genome FASTA file.
+# This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file,
+# and reference genome FASTA file.
 mixed_bams:
   - "../analysis/Test_BAM_files/Mira_4_possorted_genome_bam.bam"
   - "../analysis/Test_BAM_files/possorted_genome_bam.bam"
@@ -17,7 +18,9 @@ genome: "/mnt/data/project0061/bam_manipulation/published/Smansoni_genome/fasta/
 sample_id: "Schistosoma_mansoni"
 
 # CSV Column Names
-# This section defines the expected column names in the metadata CSV file. The user can customize these if their CSV uses different column names for barcodes, cell types, or BAM file associations.
+# This section defines the expected column names in the metadata CSV file.
+# The user can customize these if their CSV uses different column names for barcodes,
+# cell types, or BAM file associations.
 csv_columns:
   barcode: "cell_barcode"
   cell_type: "Cluster"
@@ -37,3 +40,8 @@ run_ic0_profiling: true  # To run make it as true if not keep it as false
 
 # Split half stability QC (opt-in, heavy: runs assembly + kallisto twice per cell type)
 run_splithalf: false
+
+# Library strandedness for StringTie: "fr", "rf", or "" if unstranded.
+# Required when the aligner does not emit XS:A: tags on spliced alignments,
+# as Cell Ranger does not. Without it StringTie discards spliced reads.
+library_type: "fr"

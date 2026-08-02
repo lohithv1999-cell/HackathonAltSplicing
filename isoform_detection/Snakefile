@@ -11,6 +11,8 @@ os.makedirs("slurm", exist_ok=True)
 
 COL_CELL_TYPE = config.get("csv_columns", {}).get("cell_type", "cell_type")
 CSV_PATHS = config.get("metadata_csv", [])
+LIB_TYPE = config.get("library_type", "")
+
 
 # If the metadata CSV path is provided as a string, convert it to a list for consistent processing. If it's empty or not provided, initialize it as an empty list.
 if isinstance(CSV_PATHS, str):
@@ -64,6 +66,10 @@ def get_fastq(wildcards):
 def stringtie_gff_flag(wildcards):
     return f"-G {GFF}" if GFF else ""
 
+# Generate the appropriate library type flag for StringTie based on the configuration
+def stringtie_lib_flag(wildcards):
+    return f"--{LIB_TYPE}" if LIB_TYPE else ""
+
 def all_targets():
     targets = [
         OUT_DIR + "/qc/QC_Dashboard.html",
@@ -87,8 +93,9 @@ rule stringtie:
         gtf=OUT_DIR + "/stringtie/{sample_id}.gtf",
     params:
         gflag=stringtie_gff_flag,
+        libflag=stringtie_lib_flag,
     shell:     # used a Linux pipe (|) to force samtools to perfectly coordinate to sort the BAM file in memory right before it gets handed to StringTie.
-        r"""samtools sort -@ 8 {input.bam} | stringtie -o {output.gtf} -p 24 {params.gflag} -"""
+        r"""samtools sort -@ 8 {input.bam} | stringtie -o {output.gtf} -p 24 {params.gflag} {params.libflag} -"""
 
 
 rule fastaForTranscripts:
@@ -338,6 +345,7 @@ rule qc_splithalf_compare:
         bam_b=OUT_DIR + "/kallisto/{cell}__halfB/pseudoalignments.bam",
     output:
         tsv=OUT_DIR + "/qc/splithalf/{cell}_stability.tsv",
+        loci=OUT_DIR + "/qc/splithalf/unstable_loci/{cell}_unstable_loci.tsv",
     params:
         abund_a=OUT_DIR + "/kallisto/{cell}__halfA/abundance.tsv",
         abund_b=OUT_DIR + "/kallisto/{cell}__halfB/abundance.tsv",
@@ -349,6 +357,7 @@ rule qc_splithalf_compare:
             --abund-a {params.abund_a} --abund-b {params.abund_b} \
             --gffcompare-prefix {params.prefix} \
             --sample {wildcards.cell} \
+            --unstable-loci {output.loci} \
             -o {output.tsv}
         """
 

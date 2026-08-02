@@ -1,29 +1,13 @@
 #!/usr/bin/env python3
 """Compare the two halves of a split-half stability run.
 
-The split-half check runs each half of a cell type's reads through assembly and
-pseudoalignment independently. This script compares the two results and reports how
-far they agree.
+Two things get measured. Assembly stability is how many isoforms turn up in both
+halves, matched on intron chain with gffcompare rather than on name, since StringTie
+numbers transcripts arbitrarily per run. Assignment stability is how well the read
+counts agree across those matches.
 
-Two things are measured, and they test different parts of the pipeline:
-
-  Assembly stability   Did the two halves find the same isoforms? StringTie names
-                       transcripts arbitrarily per run, so half A's STRG.1.1 and
-                       half B's STRG.1.1 are unrelated. gffcompare matches them on
-                       intron chain instead, and only exact matches (class code "=")
-                       are counted.
-
-  Assignment stability Across the isoforms found in both halves, do they receive
-                       similar read counts? Reported as Pearson and Spearman
-                       correlation of kallisto's est_counts.
-
-Counts are compared raw rather than as TPM. TPM divides by effective length, which
-depends on the configured fragment length, and comparing raw counts keeps this
-measure independent of that parameter. The two halves carry near-identical read
-totals in any case, so there is little to normalise away.
-
-Note that the halves are expected to differ. They contain different reads by design,
-so this measures stability, not reproducibility.
+Counts are compared raw, not as TPM, since TPM divides by effective length and that
+depends on the fragment length setting.
 """
 
 import argparse
@@ -46,20 +30,10 @@ def read_abundance(path):
 
 
 def count_transcripts(gtf_path):
-    """Count transcripts in a GTF and identify which have more than one exon.
+    """Count transcripts, and return the ids of those with more than one exon.
 
-    Returns (n_transcripts, set_of_multi_exon_transcript_ids).
-
-    The multi-exon set matters because the whole comparison rests on it.
-    gffcompare's exact-match class code is primarily an intron-chain match, so a
-    single-exon transcript has no chain to match on. An assembly with no
-    multi-exon transcripts cannot be compared at all, and the caller needs to be
-    told that rather than handed a zero. Returning the identifiers rather than
-    just a count also lets the matched pairs be filtered to multi-exon transcripts,
-    so that the numerator and denominator describe the same population.
-
-    Transcripts are counted from transcript features. Exons are tallied per
-    transcript_id, since a transcript line does not itself say how many exons follow.
+    Single-exon transcripts have no intron chain, so gffcompare can't match them and
+    they have to be kept out of the recovery denominator.
     """
     n_tx = 0
     exons_per_tx = {}
@@ -100,12 +74,11 @@ def run_gffcompare(gtf_a, gtf_b, prefix):
 
 
 def parse_tracking(tracking_path):
-    """Pull exact-match transcript pairs out of a gffcompare .tracking file.
+    """Pull exact-match pairs (class code "=") out of a gffcompare .tracking file.
 
-    Columns are: query transfrag id, locus id, reference gene|transcript, class
-    code, then one column per input GTF holding that GTF's transcript for this
-    transfrag. We keep only rows with class code "=", meaning the intron chains
-    match exactly, and pull the transcript id from each side.
+    Columns: transfrag id, locus, reference gene|transcript, class code, then one
+    column per input GTF. Locus comes back too, since transcripts sharing a locus
+    compete for the same reads and it's worth being able to group by it.
     """
     pairs = []
     with open(tracking_path) as fh:
@@ -116,6 +89,8 @@ def parse_tracking(tracking_path):
             class_code = fields[3]
             if class_code != "=":
                 continue
+
+            locus = fields[1]
 
             # Reference column looks like "gene_id|transcript_id".
             ref_field = fields[2]
@@ -132,7 +107,7 @@ def parse_tracking(tracking_path):
                 continue
             qry_tx = parts[1]
 
-            pairs.append((ref_tx, qry_tx))
+            pairs.append((ref_tx, qry_tx, locus))
     return pairs
 
 
@@ -172,6 +147,64 @@ def spearman(xs, ys):
     return pearson(rank(xs), rank(ys))
 
 
+def transcript_coords(gtf_path):
+    """Transcript coordinates from a GTF, for reporting unstable loci by position.
+
+    gffcompare's XLOC ids are per-run, so they can't be compared across cell types.
+    """
+    coords = {}
+    with open(gtf_path) as fh:
+        for line in fh:
+            if line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 9 or fields[2] != "transcript":
+                continue
+            match = re.search(r'transcript_id "([^"]+)"', fields[8])
+            if match:
+                coords[match.group(1)] = (fields[0], int(fields[3]), int(fields[4]))
+    return coords
+
+
+def write_unstable_loci(path, sample, locus_a, locus_b, locus_txs, coords, top_n=20):
+    """Write the loci whose counts disagree most between the halves.
+
+    A handful of loci can account for most of the disagreement, and since they carry
+    huge counts they drag the Pearson down while barely touching the rank
+    correlation. Worth having them listed by coordinate rather than just a summary.
+    """
+    rows = []
+    total = sum(abs(locus_a[k] - locus_b[k]) for k in locus_a)
+    for locus in sorted(locus_a, key=lambda k: abs(locus_a[k] - locus_b[k]), reverse=True)[:top_n]:
+        txs = locus_txs.get(locus, [])
+        placed = [coords[t] for t in txs if t in coords]
+        if placed:
+            seqname = placed[0][0]
+            start = min(p[1] for p in placed)
+            end = max(p[2] for p in placed)
+        else:
+            seqname, start, end = "NA", "NA", "NA"
+        diff = abs(locus_a[locus] - locus_b[locus])
+        rows.append({
+            "Sample": sample,
+            "Seqname": seqname,
+            "Start": start,
+            "End": end,
+            "N_Transcripts": len(txs),
+            "Counts_A": round(locus_a[locus], 1),
+            "Counts_B": round(locus_b[locus], 1),
+            "Abs_Difference": round(diff, 1),
+            "Pct_Of_Total_Discrepancy": round(100 * diff / total, 2) if total else 0.0,
+        })
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", newline="") as out:
+        writer = csv.DictWriter(out, fieldnames=list(rows[0].keys()), delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+    return rows, total
+
+
 def write_row(path, row):
     """Write a single-row TSV. Used by both the normal and the not-applicable paths,
     so that a run which cannot be assessed still produces a file the collate step can
@@ -192,6 +225,8 @@ def main():
     parser.add_argument("--gffcompare-prefix", required=True, help="Output prefix for gffcompare files")
     parser.add_argument("--sample", required=True, help="Cell type name, for the output row")
     parser.add_argument("-o", "--output", required=True, help="Output TSV")
+    parser.add_argument("--unstable-loci", default=None,
+                        help="Optional TSV listing the loci whose counts disagree most between halves")
     args = parser.parse_args()
 
     n_a, multi_a_ids = count_transcripts(args.gtf_a)
@@ -199,9 +234,8 @@ def main():
     multi_a = len(multi_a_ids)
     multi_b = len(multi_b_ids)
 
-    # gffcompare matches on intron chain, so an assembly with no multi-exon
-    # transcripts offers nothing to match and would silently return zero. Say so
-    # plainly instead, and stop before running a comparison that cannot work.
+    # Nothing to match on without intron chains, so say so instead of returning a
+    # zero that looks like a result.
     if multi_a == 0 or multi_b == 0:
         write_row(args.output, {
             "Sample": args.sample,
@@ -218,6 +252,8 @@ def main():
             "Compared_Transcripts": "NA",
             "Counts_Pearson": "NA",
             "Counts_Spearman": "NA",
+            "Loci_Compared": "NA",
+            "Locus_Pearson": "NA",
             "Total_Counts_A": "NA",
             "Total_Counts_B": "NA",
             "Status": "no_multi_exon_transcripts",
@@ -238,19 +274,11 @@ def main():
     pairs = parse_tracking(tracking)
     n_matched = len(pairs)
 
-    # Assembly stability: how much of each half's assembly the other half recovered.
-    #
-    # The multi-exon figure is the meaningful one, and it is computed from matches
-    # where both transcripts are multi-exon. Restricting the numerator this way
-    # matters: gffcompare also assigns its exact-match code to some single-exon
-    # transfrags, so counting every match against a multi-exon denominator can
-    # exceed 100 per cent, which is how this was first noticed. Numerator and
-    # denominator now describe the same population.
-    #
-    # The all-transcript figures are kept for context, but they understate stability,
-    # since single-exon transcripts are largely unmatchable by intron chain and their
-    # number varies with how fragmented the assembly happens to be.
-    multi_pairs = [(a, b) for a, b in pairs if a in multi_a_ids and b in multi_b_ids]
+    # Only count matches where both sides are multi-exon. gffcompare hands its "="
+    # code to some single-exon transfrags too, and counting those against a
+    # multi-exon denominator gave over 100%, which is how this got noticed.
+    # The all-transcript figures are kept for context but understate things.
+    multi_pairs = [(a, b, loc) for a, b, loc in pairs if a in multi_a_ids and b in multi_b_ids]
     n_matched_multi = len(multi_pairs)
 
     pct_a_recovered = 100 * n_matched / n_a if n_a else 0.0
@@ -258,18 +286,32 @@ def main():
     pct_a_multi_recovered = 100 * n_matched_multi / multi_a if multi_a else 0.0
     pct_b_multi_recovered = 100 * n_matched_multi / multi_b if multi_b else 0.0
 
-    # Assignment stability: correlate read counts across the matched isoforms only.
+    # Both transcript level and locus level, because they answer different things.
+    # Where two isoforms overlap heavily the EM can give nearly all the reads to one
+    # of them, and which one wins flips easily between halves. So a transcript can
+    # swing from almost everything to almost nothing while its locus total barely
+    # moves. Summing per locus first separates that from a real disagreement about
+    # how much the gene was expressed.
     counts_a = read_abundance(args.abund_a)
     counts_b = read_abundance(args.abund_b)
 
     xs, ys = [], []
-    for ref_tx, qry_tx in pairs:
+    locus_a, locus_b, locus_txs = {}, {}, {}
+    for ref_tx, qry_tx, locus in pairs:
         if ref_tx in counts_a and qry_tx in counts_b:
             xs.append(counts_a[ref_tx])
             ys.append(counts_b[qry_tx])
+            locus_a[locus] = locus_a.get(locus, 0.0) + counts_a[ref_tx]
+            locus_b[locus] = locus_b.get(locus, 0.0) + counts_b[qry_tx]
+            locus_txs.setdefault(locus, []).append(ref_tx)
 
     r_pearson = pearson(xs, ys)
     r_spearman = spearman(xs, ys)
+
+    loci = sorted(locus_a)
+    lxs = [locus_a[k] for k in loci]
+    lys = [locus_b[k] for k in loci]
+    r_locus = pearson(lxs, lys)
 
     total_a = sum(counts_a.values())
     total_b = sum(counts_b.values())
@@ -289,6 +331,8 @@ def main():
         "Compared_Transcripts": len(xs),
         "Counts_Pearson": round(r_pearson, 4) if r_pearson is not None else "NA",
         "Counts_Spearman": round(r_spearman, 4) if r_spearman is not None else "NA",
+        "Loci_Compared": len(loci),
+        "Locus_Pearson": round(r_locus, 4) if r_locus is not None else "NA",
         "Total_Counts_A": round(total_a, 1),
         "Total_Counts_B": round(total_b, 1),
         "Status": "ok",
@@ -303,6 +347,19 @@ def main():
     print(f"[{args.sample}] counts on matched isoforms: "
           f"Pearson={row['Counts_Pearson']} Spearman={row['Counts_Spearman']} "
           f"(n={len(xs):,})")
+    print(f"[{args.sample}] counts summed per locus: "
+          f"Pearson={row['Locus_Pearson']} (n={len(loci):,} loci)")
+
+    # Where the disagreement sits. If a few loci account for most of it, the Pearson
+    # is being driven by outliers and the rank correlation is the fairer summary.
+    if args.unstable_loci and locus_a:
+        coords = transcript_coords(args.gtf_a)
+        top_rows, total_diff = write_unstable_loci(
+            args.unstable_loci, args.sample, locus_a, locus_b, locus_txs, coords)
+        top_share = sum(r["Abs_Difference"] for r in top_rows)
+        print(f"[{args.sample}] the {len(top_rows)} most discrepant loci account for "
+              f"{100 * top_share / total_diff:.1f}% of all disagreement"
+              if total_diff else f"[{args.sample}] no disagreement to report")
 
 
 if __name__ == "__main__":

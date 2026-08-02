@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
 """Gather the per-cell-type split-half stability results into one table.
 
-Each cell type produces a single-row TSV from qc_splithalf_compare.py. This
-concatenates them, sorts by read depth so the relationship between depth and
-stability is visible at a glance, and prints a short summary.
-
-Stability is expected to track sequencing depth: halving a deep cell type still
-leaves each half with plenty of reads to assemble from, whereas halving a shallow
-one can leave too few, so the two halves diverge. Sorting by depth makes that
-pattern, if it is there, obvious.
+Sorted by depth, since that is the obvious thing to check the figures against.
 """
 
 import argparse
@@ -29,8 +22,7 @@ def main():
             reader = csv.DictReader(fh, delimiter="\t")
             if fieldnames is None:
                 fieldnames = reader.fieldnames
-            for row in reader:
-                rows.append(row)
+            rows.extend(reader)
 
     if not rows:
         raise SystemExit("No stability rows found")
@@ -52,14 +44,12 @@ def main():
     print(f"Split-half stability, {len(rows)} cell types (deepest first):")
     print(f"  {'Sample':<20} {'depth':>14} {'%multi-exon recovered':>22} {'Pearson':>9}")
     for row in rows:
-        pearson_val = row.get("Counts_Pearson", "NA")
         recovered = row.get("Pct_MultiExon_A_Recovered", row.get("Pct_A_Recovered_In_B", "NA"))
         print(f"  {row['Sample']:<20} {depth(row):>14,.0f} "
-              f"{recovered:>22} {pearson_val:>9}")
+              f"{recovered:>22} {row.get('Counts_Pearson', 'NA'):>9}")
 
-    # Cell types that could not be assessed at all, most often because the
-    # assembly held no multi-exon transcripts for gffcompare to match on. Report
-    # these separately rather than letting them disappear into the averages.
+    # Cell types the compare step could not assess at all, usually because the
+    # assembly had no multi-exon transcripts. Kept out of the averages.
     skipped = [r for r in rows if r.get("Status", "ok") != "ok"]
     if skipped:
         print(f"\n  {len(skipped)} of {len(rows)} cell types could not be assessed:")

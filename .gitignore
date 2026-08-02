@@ -26,3 +26,5 @@ results/
 samtools.*.tmp.*.bam
 isoform_detection/complete_pipeline_map.pdf
 .panoptes.db
+*.log
+nohup.out
