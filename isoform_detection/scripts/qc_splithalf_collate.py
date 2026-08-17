@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gather the per-cell-type split-half stability results into one table.
 
-Sorted by depth, since that is the obvious thing to check the figures against.
+Sorted by read count, since that is the obvious thing to check the figures against.
 """
 
 import argparse
@@ -27,7 +27,7 @@ def main():
     if not rows:
         raise SystemExit("No stability rows found")
 
-    def depth(row):
+    def read_total(row):
         try:
             return float(row.get("Total_Counts_A", 0)) + float(row.get("Total_Counts_B", 0))
         except (TypeError, ValueError):
@@ -41,12 +41,8 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Split-half stability, {len(rows)} cell types (deepest first):")
-    print(f"  {'Sample':<20} {'depth':>14} {'%multi-exon recovered':>22} {'Pearson':>9}")
     for row in rows:
         recovered = row.get("Pct_MultiExon_A_Recovered", row.get("Pct_A_Recovered_In_B", "NA"))
-        print(f"  {row['Sample']:<20} {depth(row):>14,.0f} "
-              f"{recovered:>22} {row.get('Counts_Pearson', 'NA'):>9}")
 
     # Cell types the compare step could not assess at all, usually because the
     # assembly had no multi-exon transcripts. Kept out of the averages.

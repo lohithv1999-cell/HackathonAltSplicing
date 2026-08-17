@@ -1,21 +1,21 @@
 # Run Identity (Name the task as per the user)
-run_identity: "03_full_gff_stranded_stringtie"
+run_identity: "My_Run"
 
 # Data Paths
 # This specifies the paths to input data files, including the BAM files, metadata CSV, GFF annotation file,
 # and reference genome FASTA file.
 mixed_bams:
-  - "../analysis/Test_BAM_files/Mira_4_possorted_genome_bam.bam"
-  - "../analysis/Test_BAM_files/possorted_genome_bam.bam"
+  - "/path/to/01_possorted_genome_bam.bam"
+  - "/path/to/02_possorted_genome_bam.bam"
 metadata_csv:
-  - "../analysis/cc_barcode_Mira_4.csv"
-  - "../analysis/cc_barcode_Mira_1.csv"
+  - "/path/to/01_barcodes.csv"
+  - "/path/to/02_barcodes.csv"
 
-gff: "/mnt/autofs/data/userdata/project0061/ref/schistosoma_mansoni.PRJEA36577.WBPS19.annotations.gff3"
-genome: "/mnt/data/project0061/bam_manipulation/published/Smansoni_genome/fasta/genome.fa"
+gff: "/path/to/annotation.gff3"
+genome: "/path/to/genome.fa"
 
 # Metadata
-sample_id: "Schistosoma_mansoni"
+sample_id: "My_Sample_ID"
 
 # CSV Column Names
 # This section defines the expected column names in the metadata CSV file.

@@ -27,11 +27,35 @@ def split_multiple_bams(bam_paths, csv_paths, output_dir, col_barcode="barcode",
     output_files = {}
     unique_cell_types = set(mapping.values())
 
-    template_bam = pysam.AlignmentFile(bam_paths[0], "rb")
+    # Need to ensure that all BAM files have the same reference sequence dictionary. 
+    # Then check the references and lengths of the first BAM file against all others.
+
+    with pysam.AlignmentFile(bam_paths[0], "rb") as first_bam:
+        header = first_bam.header.to_dict()
+        reference = (tuple(first_bam.references), tuple(first_bam.lengths))
+
+    seen_rgs = {rg["ID"] for rg in header.get("RG", [])}
+    for bam_path in bam_paths[1:]:
+        with pysam.AlignmentFile(bam_path, "rb") as extra_bam:
+            if (tuple(extra_bam.references), tuple(extra_bam.lengths)) != reference:
+                raise ValueError(
+                    f"{bam_path} is aligned to a different reference from "
+                    f"{bam_paths[0]}. All input BAMs must share a sequence dictionary."
+                )
+            for rg in extra_bam.header.to_dict().get("RG", []):
+                if rg["ID"] in seen_rgs:
+                    print(f"  warning: read group {rg['ID']} appears in more than one "
+                          f"input; reads from {os.path.basename(bam_path)} will be "
+                          f"indistinguishable from the earlier one")
+                else:
+                    header.setdefault("RG", []).append(rg)
+                    seen_rgs.add(rg["ID"])
+
+    print(f"Header carries {len(seen_rgs)} read group(s): {', '.join(sorted(seen_rgs))}")
+
     for ct in unique_cell_types:
         out_name = os.path.join(output_dir, f"{ct}.bam")
-        output_files[ct] = pysam.AlignmentFile(out_name, "wb", template=template_bam)
-    template_bam.close()
+        output_files[ct] = pysam.AlignmentFile(out_name, "wb", header=header)
 
     # Iterate through each BAM file and process reads
     for bam_path in bam_paths:

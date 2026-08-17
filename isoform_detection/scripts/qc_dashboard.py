@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Builds the master QC dashboard: one HTML page gathering the per-cell-type QC
+"""Builds the QC dashboard: one HTML page gathering the per-cell-type QC
 reports into a single picture.
  
 The page has, from top to bottom:
   - a summary panel of the headline cohort numbers
   - tag completeness by cell type (bar)
-  - completeness vs sequencing depth (scatter) with the depth correlation
+  - completeness vs reads per cell type (scatter) with the correlation
   - parameter sensitivity: mean retention vs ZW cutoff (line)
   - read fate by cell type (stacked bar) -- only shown when IC:i:0 profiling
     data is present, since that is an optional pipeline step
@@ -21,6 +21,7 @@ import argparse
 import glob
 import os
 import math
+from datetime import datetime
 
 
 # Small helper so each chart can carry a plain-English caption explaining what it is actually counting.
@@ -46,14 +47,18 @@ def pearson(xs, ys):
     return cov / (sx * sy)
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate the QC dashboard")
+    parser = argparse.ArgumentParser(description="Generate the master QC dashboard")
     parser.add_argument("-c", "--comp_dir", required=True, help="Directory with tag-completeness TSVs")
     parser.add_argument("-s", "--sens_dir", required=True, help="Directory with sensitivity TSVs")
     parser.add_argument("-o", "--output", required=True, help="Output HTML file path")
-    parser.add_argument("-i", "--ic0_dir", default=None, help="Optional directory with IC:i:0 profiling TSVs (for the read-fate chart)")
-    parser.add_argument("-t", "--threshold", type=float, default=0.8, help="ZW assignment threshold, used only for chart labels")
+    parser.add_argument("-i", "--ic0_dir", default=None,
+                        help="Optional directory with IC:i:0 profiling TSVs (for the read-fate chart)")
+    parser.add_argument("-t", "--threshold", type=float, default=0.8,
+                        help="ZW assignment threshold, used only for chart labels [%(default)s]")
+    parser.add_argument("-r", "--run-identity", default=None,
+                        help="Run name, shown on the page so an exported chart can be traced back")
     args = parser.parse_args()
-
+ 
     html_parts = []
 
 # Load completeness
@@ -75,9 +80,9 @@ def main():
         total = int(df_comp["Total_Reads"].sum())
         assigned = int(df_comp["Assigned_Reads"].sum())
         pooled = assigned / total * 100 if total else 0
-        depths = [math.log10(d) for d in df_comp["Total_Reads"] if d > 0]
+        log_reads = [math.log10(d) for d in df_comp["Total_Reads"] if d > 0]
         compl = [c for d, c in zip(df_comp["Total_Reads"], df_comp["Completeness_Percentage"]) if d > 0]
-        r_depth = pearson(depths, compl)
+        r_reads = pearson(log_reads, compl)
  
         swing_txt = ""
         if df_sens is not None:
@@ -99,8 +104,8 @@ def main():
         panel += stat("cell types", len(df_comp))
         panel += stat("reads assigned", f"{pooled:.1f}%")
         panel += stat("total reads", f"{total/1e6:.0f}M")
-        if r_depth is not None:
-            panel += stat("depth correlation", f"{r_depth:.2f}")
+        if r_reads is not None:
+            panel += stat("reads correlation", f"{r_reads:.2f}")
         panel += "</div>"
         if swing_txt:
             panel += f"<p style='text-align:center; color:#555; margin-top:-20px;'>{swing_txt}</p>"
@@ -122,22 +127,22 @@ def main():
         html_parts.append("<hr>")
  
 
-# CHART 2: completeness vs sequencing depth (scatter)
+# CHART 2: completeness by cell type
     if df_comp is not None:
         d = df_comp.copy()
-        r_txt = f" (r = {r_depth:.2f} on log depth)" if r_depth is not None else ""
+        r_txt = f" (r = {r_reads:.2f} on log reads)" if r_reads is not None else ""
         fig = px.scatter(
             d, x="Total_Reads", y="Completeness_Percentage",
             color="Sample", text="Sample", log_x=True,
-            title="Completeness vs sequencing depth" + r_txt,
+            title="Completeness vs total reads per cell type" + r_txt,
         )
         fig.update_traces(textposition="top center", textfont_size=9, marker_size=11)
-        fig.update_layout(xaxis_title="Sequencing depth (total reads, log scale)",
+        fig.update_layout(xaxis_title="Total reads per cell type (log scale)",
                           yaxis_title="Tag completeness (%)", showlegend=False)
         html_parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
         html_parts.append(caption(
             "Each point is one cell type. The trend shows how assignment rate rises with "
-            "sequencing depth. A high correlation means depth strongly predicts completeness."
+            "the total number of reads assigned to that cell type. Note this is a count of pooled reads, not a per-cell sequencing depth: a cell type with many cells at low coverage and one with few cells at high coverage can carry the same total."
         ))
         html_parts.append("<hr>")
  
@@ -165,7 +170,6 @@ def main():
     ic0_df = None
     if args.ic0_dir and os.path.isdir(args.ic0_dir):
         ic0_files = glob.glob(os.path.join(args.ic0_dir, "*_ic0.tsv"))
-        # allow either per-cell-type files or a single combined ALL_ic0.tsv
         all_file = os.path.join(args.ic0_dir, "ALL_ic0.tsv")
         if os.path.exists(all_file):
             ic0_df = pd.read_csv(all_file, sep="\t")
@@ -174,7 +178,6 @@ def main():
  
     if ic0_df is not None and not ic0_df.empty:
         d = ic0_df.copy()
-        # percentages per cell type
         d["tot"] = d["Assigned"] + d["Scored_But_Low"] + d["Not_Pseudoaligned"]
         d["p_assigned"] = 100 * d["Assigned"] / d["tot"]
         d["p_low"] = 100 * d["Scored_But_Low"] / d["tot"]
@@ -207,10 +210,21 @@ def main():
   
   # WRITE PAGE
     with open(args.output, "w") as f:
-        f.write("<html><head><title>Alternative Splicing QC Dashboard</title></head>")
+        page_title = "Alternative Splicing QC Dashboard"
+        if args.run_identity:
+            page_title += f" \u2014 {args.run_identity}"
+        f.write(f"<html><head><title>{page_title}</title></head>")
         f.write("<body style='font-family: Verdana, sans-serif;'>")
-        f.write("<h1 style='text-align: center; padding-top: 20px;'>"
+        f.write("<h1 style='text-align: center; padding-top: 20px; margin-bottom: 4px;'>"
                 "Alternative Splicing Pipeline - Quality Control Dashboard</h1>")
+        # Run name and timestamp, so a chart exported from this page can be traced
+        # back to the run that produced it.
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        subtitle = f"generated {stamp}"
+        if args.run_identity:
+            subtitle = f"run: {args.run_identity} &nbsp;|&nbsp; " + subtitle
+        f.write("<p style='text-align: center; color: #666; font-size: 14px; "
+                f"margin-top: 0; margin-bottom: 24px;'>{subtitle}</p>")
         for part in html_parts:
             f.write(part)
         f.write("</body></html>")

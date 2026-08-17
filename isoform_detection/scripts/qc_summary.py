@@ -40,6 +40,7 @@ def main():
     parser.add_argument("-o", "--output", required=True, help="Output summary TSV")
     args = parser.parse_args()
 
+# completeness: pooled rate and the coorelation with read count
     comp_rows = []
     for f in glob.glob(os.path.join(args.comp_dir, "*_completeness.tsv")):
         comp_rows.extend(read_tsv(f))
@@ -51,9 +52,11 @@ def main():
         assigned = sum(int(r["Assigned_Reads"]) for r in comp_rows)
         pooled_rate = (assigned / total * 100) if total > 0 else 0.0
 
-        depths = [int(r["Total_Reads"]) for r in comp_rows if int(r["Total_Reads"]) > 0]
+        # Correlation of log10(total reads) against completeness, across cell types.
+        # These are pooled reads per cell type.
+        read_totals = [int(r["Total_Reads"]) for r in comp_rows if int(r["Total_Reads"]) > 0]
         compl = [float(r["Completeness_Percentage"]) for r in comp_rows if int(r["Total_Reads"]) > 0]
-        r_depth = pearson([math.log10(d) for d in depths], compl)
+        r_reads = pearson([math.log10(d) for d in read_totals], compl)
 
         pcts = [float(r["Completeness_Percentage"]) for r in comp_rows]
         names = [r["Sample"] for r in comp_rows]
@@ -65,7 +68,7 @@ def main():
             ("total_reads", total),
             ("total_assigned", assigned),
             ("pooled_assignment_rate_pct", round(pooled_rate, 2)),
-            ("completeness_corr_log_depth", round(r_depth, 3) if r_depth is not None else "NA"),
+            ("completeness_corr_log_reads", round(r_reads, 3) if r_reads is not None else "NA"),
             ("completeness_min_pct", f"{pcts[i_min]:.2f} ({names[i_min]})"),
             ("completeness_max_pct", f"{pcts[i_max]:.2f} ({names[i_max]})"),
         ]
