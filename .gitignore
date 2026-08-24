@@ -29,3 +29,6 @@ isoform_detection/complete_pipeline_map.pdf
 .panoptes.db
 *.log
 nohup.out
+# Test dataset committed deliberately, despite the *.bam rule above
+!data/test_dataset/*.bam
+!data/test_dataset/*.bam.bai
