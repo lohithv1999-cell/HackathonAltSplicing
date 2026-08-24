@@ -28,8 +28,8 @@ csv_columns:
 
 # Sequencing Parameters
 read_mode: "single"   # Options: "single" or "paired"
-fragment_length: 200  # Average length of your RNA fragments(350)
-fragment_sd: 20       # Standard deviation of fragment length(60)
+fragment_length: 200  # Average length of your RNA fragments
+fragment_sd: 20       # Standard deviation of fragment length
 
 # ZW probability threshold
 zw_threshold: 0.8
